@@ -1,25 +1,55 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-COOKIES="/tmp/cookies.txt"
+COOKIES="/tmp/qb.cookie"
 
-update_port () {
-  PORT=$(cat $PORT_FORWARDED)
-  rm -f $COOKIES
-  curl -s -c $COOKIES --data "username=$QBITTORRENT_USER&password=$QBITTORRENT_PASS" ${HTTP_S}://${QBITTORRENT_SERVER}:${QBITTORRENT_PORT}/api/v2/auth/login > /dev/null
-  curl -s -b $COOKIES --data 'json={"listen_port": "'"$PORT"'"}' ${HTTP_S}://${QBITTORRENT_SERVER}:${QBITTORRENT_PORT}/api/v2/app/setPreferences > /dev/null
-  rm -f $COOKIES
-  echo "Successfully updated qbittorrent to port $PORT"
+# Expects envs:
+# QBITTORRENT_USER, QBITTORRENT_PASS, QBITTORRENT_SERVER, QBITTORRENT_PORT, HTTP_S, PORT_FORWARDED
+
+login() {
+  curl -s -c "$COOKIES" \
+    -H "Referer: ${HTTP_S}://${QBITTORRENT_SERVER}:${QBITTORRENT_PORT}/" \
+    -H "Origin: ${HTTP_S}://${QBITTORRENT_SERVER}:${QBITTORRENT_PORT}" \
+    -X POST \
+    --data-urlencode "username=${QBITTORRENT_USER}" \
+    --data-urlencode "password=${QBITTORRENT_PASS}" \
+    "${HTTP_S}://${QBITTORRENT_SERVER}:${QBITTORRENT_PORT}/api/v2/auth/login" >/dev/null
 }
 
+set_listen_port() {
+  local port="$1"
+  curl -s -b "$COOKIES" \
+    -H "Referer: ${HTTP_S}://${QBITTORRENT_SERVER}:${QBITTORRENT_PORT}/" \
+    -H "Origin: ${HTTP_S}://${QBITTORRENT_SERVER}:${QBITTORRENT_PORT}" \
+    --data "json={\"listen_port\":${port}}" \
+    "${HTTP_S}://${QBITTORRENT_SERVER}:${QBITTORRENT_PORT}/api/v2/app/setPreferences" >/dev/null
+}
+
+update_port () {
+  if [[ ! -f "$PORT_FORWARDED" ]]; then
+    echo "Missing forwarded port file at $PORT_FORWARDED"
+    return 1
+  fi
+
+  PORT="$(tr -d '\n\r' < "$PORT_FORWARDED")"
+  [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "Invalid port in file: $PORT"; return 1; }
+
+  rm -f "$COOKIES"
+  login
+  set_listen_port "$PORT"
+  rm -f "$COOKIES"
+  echo "✅ Updated qBittorrent listen port to $PORT"
+}
+
+# First apply immediately, then watch for changes to the file
 while true; do
-  if [ -f $PORT_FORWARDED ]; then
+  if [[ -f "$PORT_FORWARDED" ]]; then
     update_port
-    inotifywait -mq -e close_write $PORT_FORWARDED | while read change; do
+    inotifywait -mq -e close_write --format '%w%f' "$PORT_FORWARDED" | while read -r _; do
       update_port
     done
   else
-    echo "Couldn't find file $PORT_FORWARDED"
-    echo "Trying again in 10 seconds"
+    echo "⏳ Port file $PORT_FORWARDED not found, retrying in 10s..."
     sleep 10
   fi
 done
