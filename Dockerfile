@@ -1,16 +1,15 @@
 FROM alpine:latest
 
-RUN apk update
 RUN apk add --no-cache curl inotify-tools bash
 
-ENV QBITTORRENT_SERVER=localhost
-ENV QBITTORRENT_PORT=8080
-ENV QBITTORRENT_USER=admin
-ENV QBITTORRENT_PASS=adminadmin
-ENV PORT_FORWARDED=tmp/gluetun/forwarded_port
-ENV HTTP_S=http
+ENV QBITTORRENT_SERVER=127.0.0.1 \
+    QBITTORRENT_PORT=8080 \
+    QBITTORRENT_USER=admin \
+    QBITTORRENT_PASS=adminadmin \
+    PORT_FORWARDED=/tmp/gluetun/forwarded_port \
+    HTTP_S=http
 
-COPY ./start.sh ./start.sh
-RUN chmod 770 ./start.sh
-
+WORKDIR /app
+COPY start.sh .
+RUN chmod +x start.sh
 CMD ["./start.sh"]
